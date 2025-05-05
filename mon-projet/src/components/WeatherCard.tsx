@@ -1,17 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { fetchWeather, fetchForecast } from '../services/weatherService';
 import { SearchBar } from './SearchBar';
 
-interface ImportMetaEnv {
-    VITE_WEATHER_API_KEY: string;
-}
-
-interface ImportMeta {
-    env: ImportMetaEnv;
-}
-
-type WeatherData = {
-    name: string;
+interface WeatherData {
     main: {
         temp: number;
         temp_min: number;
@@ -21,9 +11,9 @@ type WeatherData = {
         description: string;
         icon: string;
     }[];
-};
+}
 
-type ForecastData = {
+interface ForecastData {
     list: {
         dt: number;
         main: {
@@ -34,14 +24,13 @@ type ForecastData = {
             icon: string;
         }[];
     }[];
-};
+}
 
 const getWeatherIcon = (iconCode: string) => {
     return `https://openweathermap.org/img/wn/${iconCode}@2x.png`;
 };
 
 export const WeatherCard = () => {
-    const [city, setCity] = useState('');
     const [weather, setWeather] = useState<WeatherData | null>(null);
     const [forecast, setForecast] = useState<ForecastData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -49,49 +38,35 @@ export const WeatherCard = () => {
 
     const fetchWeatherByCoordinates = async (lat: number, lon: number) => {
         try {
+            setIsLoading(true);
+            setError(null);
             console.log("Coordonnées GPS reçues:", { latitude: lat, longitude: lon });
 
-            // D'abord, obtenir le nom exact de la ville et du pays avec l'API de géocodage inverse
-            const reverseGeocodeResponse = await fetch(
-                `https://api.openweathermap.org/geo/1.0/reverse?lat=${lat}&lon=${lon}&limit=1&appid=${import.meta.env.VITE_WEATHER_API_KEY}`
+            // Obtenir la météo directement avec les coordonnées GPS
+            const weatherResponse = await fetch(
+                `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=metric&lang=fr&appid=${import.meta.env.VITE_WEATHER_API_KEY}`
             );
-            const locationData = await reverseGeocodeResponse.json();
-            console.log("Données de géocodage inverse:", locationData);
+            const weatherData = await weatherResponse.json();
+            console.log("Données météo:", weatherData);
 
-            if (locationData.length > 0) {
-                const exactCity = locationData[0].name;
-                const country = locationData[0].country;
-                console.log("Ville et pays détectés:", { ville: exactCity, pays: country });
-                setCity(exactCity);
-
-                // Obtenir la météo directement avec les coordonnées GPS
-                const weatherResponse = await fetch(
-                    `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=metric&lang=fr&appid=${import.meta.env.VITE_WEATHER_API_KEY}`
-                );
-                const weatherData = await weatherResponse.json();
-                console.log("Données météo:", weatherData);
-
-                if (weatherData.cod && weatherData.cod !== 200) {
-                    throw new Error(weatherData.message || "Erreur lors de la récupération des données météo");
-                }
-
-                setWeather(weatherData);
-
-                // Obtenir les prévisions directement avec les coordonnées GPS
-                const forecastResponse = await fetch(
-                    `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&units=metric&lang=fr&appid=${import.meta.env.VITE_WEATHER_API_KEY}`
-                );
-                const forecastData = await forecastResponse.json();
-                console.log("Données de prévision:", forecastData);
-
-                if (forecastData.cod && forecastData.cod !== "200") {
-                    throw new Error(forecastData.message || "Erreur lors de la récupération des prévisions météo");
-                }
-
-                setForecast(forecastData);
-            } else {
-                throw new Error("Impossible de déterminer votre ville exacte");
+            if (weatherData.cod && weatherData.cod !== 200) {
+                throw new Error(weatherData.message || "Erreur lors de la récupération des données météo");
             }
+
+            setWeather(weatherData);
+
+            // Obtenir les prévisions directement avec les coordonnées GPS
+            const forecastResponse = await fetch(
+                `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&units=metric&lang=fr&appid=${import.meta.env.VITE_WEATHER_API_KEY}`
+            );
+            const forecastData = await forecastResponse.json();
+            console.log("Données de prévision:", forecastData);
+
+            if (forecastData.cod && forecastData.cod !== "200") {
+                throw new Error(forecastData.message || "Erreur lors de la récupération des prévisions météo");
+            }
+
+            setForecast(forecastData);
         } catch (err) {
             console.error("Erreur de géolocalisation:", err);
             setError("Impossible de récupérer la météo de votre position");
@@ -121,29 +96,20 @@ export const WeatherCard = () => {
         getLocation();
     }, []);
 
-    useEffect(() => {
-        if (city) {
-            setIsLoading(true);
-            Promise.all([
-                fetchWeather(city),
-                fetchForecast(city)
-            ])
-                .then(([weatherData, forecastData]) => {
-                    setWeather(weatherData);
-                    setForecast(forecastData);
-                    setError(null);
-                })
-                .catch((err) => {
-                    setError("Impossible de récupérer la météo pour cette ville");
-                })
-                .finally(() => {
-                    setIsLoading(false);
-                });
-        }
-    }, [city]);
-
     const handleSearch = (city: string) => {
-        setCity(city);
+        // Convertir le nom de la ville en coordonnées
+        fetch(`https://api.openweathermap.org/geo/1.0/direct?q=${city}&limit=1&appid=${import.meta.env.VITE_WEATHER_API_KEY}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.length > 0) {
+                    fetchWeatherByCoordinates(data[0].lat, data[0].lon);
+                } else {
+                    setError("Ville non trouvée");
+                }
+            })
+            .catch(err => {
+                setError("Erreur lors de la recherche de la ville");
+            });
     };
 
     const formatTime = (timestamp: number) => {
@@ -170,7 +136,6 @@ export const WeatherCard = () => {
                 ) : (
                     <>
                         <div className="text-center mb-6">
-                            <h2 className="text-2xl sm:text-3xl font-bold mb-2">{weather.name}</h2>
                             <div className="flex flex-col sm:flex-row items-center justify-center gap-2 mb-2">
                                 <img
                                     src={getWeatherIcon(weather.weather[0].icon)}
